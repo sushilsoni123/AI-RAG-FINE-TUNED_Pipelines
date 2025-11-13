@@ -3,9 +3,6 @@ from sentence_transformers import SentenceTransformer  ##embedding model
 from langchain_community.vectorstores import Chroma
 from langchain_community.embeddings import HuggingFaceEmbeddings ##uses SentenceTransformer in backend
 from transformers import AutoModelForCausalLM, AutoTokenizer, AutoModelForSeq2SeqLM
-# from langchain_community import Open
-# from langchain_community import LLMChain
-# from langchain_community import PromptTemplate
 from langchain_core.documents import Document
 # from pdf2image import convert_from_path    ## to extract images from pdf files.
 # from pytesseract import image_to_string ## to convert images into strings.
