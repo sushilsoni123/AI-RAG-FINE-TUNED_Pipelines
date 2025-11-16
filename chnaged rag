@@ -1,0 +1,272 @@
+
+from langchain_text_splitters import RecursiveCharacterTextSplitter
+from sentence_transformers import SentenceTransformer
+from langchain_community.vectorstores import Chroma
+from langchain_community.embeddings import HuggingFaceEmbeddings
+from transformers import AutoModelForCausalLM, AutoTokenizer, AutoModelForSeq2SeqLM
+# from langchain_community import Open
+# from langchain_community import LLMChain
+# from langchain_community import PromptTemplate
+from langchain_core.documents import Document
+# from pdf2image import convert_from_path    ## to extract images from pdf files.
+# from pytesseract import image_to_string # to convert images into strings.
+# from langchain_community import OpenAI
+# from langchain_community.document_loaders import PyPDFLoader
+# from langchain_community.document_loaders import DirectoryLoader
+import fitz #pymupdf
+import os
+from langchain_core.documents import Document
+
+
+######################## Data Ingestion Pipeline #######################
+class CreateDocuments():
+  def __init__ (self, folder_path):
+    self.folder_path = folder_path
+  def create_documents (self):
+
+    documents=[]
+    for file in os.listdir(self.folder_path):
+
+      if file.endswith(".pdf"):
+        # print (file)
+        try:
+          file_path = os.path.join (self.folder_path, file)
+          with fitz.open (file_path) as file1:
+            print (f"Opening file {file}")
+
+            if file1.is_encrypted:
+              print(f"Skipping {file}: PDF is encrypted or password-protected.")
+              continue
+
+                # Skip if no pages
+            if file1.page_count == 0:
+                print(f"Skipping {file}: PDF has no pages.")
+                continue
+
+
+            # Extract text
+            text = ""
+            for page in file1:
+                page_text = page.get_text("text")
+                if page_text.strip():
+                    text += page_text
+
+
+            # Skip if no extractable text
+            if not text.strip():
+                print(f"Skipping {file}: No extractable text (likely scanned).")
+                continue
+
+
+
+            # if file1.page_count > 0:
+            #   text = ""
+            #   for page in file1:
+            #     if page.strip():  # ✅ Only add non-empty text
+            #       text= text+page.get_text()
+            #     else
+            #   if text.strip():  # ✅ Check entire PDF before creating Document
+            docs = Document(page_content=text, metadata={"auther": "sushil", "sub": "Artificial Intelligence"})
+            documents.append (docs)
+        except Exception as e:
+          print (f"This is error message for file {file}: {e}")
+
+    for i in range ((len(documents) - 1), -1, -1):
+      print (f"This is to view page_content, if any: {documents[i].page_content[:100]}")
+    for doc in documents:
+      if doc.page_content=="":
+        print (f"This is empty doc: {doc}")
+
+
+    # print (documents[0])
+    return documents  ##returns list of DocumentObject
+    # print (documents[0].page_content)
+
+################################################################
+class CreateChunkings():
+  def __init__(self, chunk_size, chunk_overlap, documents, docobj_arr):
+    self.chunk_size = chunk_size
+    self.chunk_overlap = chunk_overlap
+    self.documents = documents
+    self.docobj_arr = docobj_arr
+  def create_chunks (self):
+    text_splitter = RecursiveCharacterTextSplitter(chunk_size=self.chunk_size, chunk_overlap=self.chunk_overlap)
+    # docum = [Document(page_content=self.documents, metadata={"auther":"sushil"})]
+    chunks = text_splitter.split_documents(self.docobj_arr) #expects list of DocumentObject for .split.documents.
+
+    return chunks
+
+##################################################################
+class CreateEmbeddings():
+  def __init__ (self, chunks):
+    self.chunks = chunks
+
+  def create_embeddings (self):
+    text_chunks=[]
+    embeddingsmodel = HuggingFaceEmbeddings(model_name="sentence-transformers/all-MiniLM-L6-v2")
+    for chunk in self.chunks:
+      if chunk.page_content!="":
+         text_chunks.append(chunk.page_content)
+
+    embeddings = embeddingsmodel.embed_documents(text_chunks)
+    return embeddings
+
+#################################################################
+class CreateVectorStore():    ##VECTOR STORE FOR DOC/KNOWLEDGE DATABASE
+  def __init__(self, prompt_doc_chunks, prompt_embeddings, embeddingsmodel,prompt, persist_directory="/content/drive/MyDrive/chroma_db"):
+
+    self.vectorstore = None
+    self.prompt_doc_chunks = prompt_doc_chunks
+    self.embeddingsmodel = embeddingsmodel
+    self.prompt = prompt
+    self.persist_directory = persist_directory
+
+  def create_vectordb (self, doc_chunks):  ##CREATE VECTOR STORE FOR DOCS/KNOWLEDGE
+    self.doc_chunks = doc_chunks
+    ids = [f"chunk_{i}" for i in range(len(doc_chunks))]
+    self.vectorstore = Chroma.from_documents(
+        self.doc_chunks, self.embeddingsmodel, persist_directory=self.persist_directory, ids=ids)
+    self.vectorstore.persist()
+    return self.vectorstore
+
+  def search_vectordb (self, prompt): ## FOR SEARCHING SIMILAR EMBEDDINGS IN RAG DB AGAINST PROMPT EMBEDDINGS ##
+
+    self.vectorstore = Chroma(embedding_function=self.embeddingsmodel, persist_directory=self.persist_directory)
+    self.similar_doc_obj = self.vectorstore.similarity_search(prompt)
+    return self.similar_doc_obj
+
+
+
+################################# DOCUMENTS ##################################
+
+folder_path = "/content/drive/MyDrive"
+docs_creator = CreateDocuments(folder_path)
+documents = docs_creator.create_documents()
+# print (documents[0].page_content)
+
+
+         ###### DOC CHUNKINGS ########
+
+doc_pages_arr = []
+for doc in documents:
+  if doc.page_content != "":
+    doc_pages_arr.append(doc.page_content)
+doc_pages = CreateChunkings(chunk_size=1000, chunk_overlap=200, documents= doc_pages_arr, docobj_arr=documents) #chunking requires list of DocObj
+
+full_doc_chunks = doc_pages.create_chunks()
+doc_chunks = [chunk for chunk in full_doc_chunks if chunk.page_content.strip()]  # remove empty chunks
+# print (f"this is CHUNKS: {doc_chunks}")
+
+        ###### DOC EMBEDDINGS ###########
+
+doc_embedds = CreateEmbeddings (doc_chunks) #DocObj chunks.
+doc_embeddings = doc_embedds.create_embeddings()
+# print (doc_embeddings)
+
+        ###### DOC VECTOR STORE #########
+
+embeddingsmodel = HuggingFaceEmbeddings(model_name="sentence-transformers/all-MiniLM-L6-v2")
+
+doc_vectorstore = CreateVectorStore(
+    prompt_doc_chunks=None, embeddingsmodel=embeddingsmodel, prompt_embeddings=None, prompt=None)
+
+doc_vectordb = doc_vectorstore.create_vectordb(doc_chunks= doc_chunks)
+
+     ########## verify check ###########
+
+print(type(doc_chunks))  # Should be list
+print(type(doc_chunks[0]))  # Should be <class 'langchain_core.documents.Document'>
+print(len(doc_chunks))  # Should be > 0
+print(doc_chunks[0].page_content[:100])  # Preview text
+
+
+
+
+##############################  PROMPT #####################################
+# prompt_docobj = [Document(page_content=prompt, metadata={"auther": "sushil"})]
+# print (prompt_docobj[0].page_content)
+
+# prompt_chunk = CreateChunkings(chunk_size=1000, chunk_overlap=200, documents=prompt, docobj_arr=prompt_docobj)# This requires list of DocObject
+
+# prompt_chunks = prompt_chunk.create_chunks()
+# print ("prompt chunks done.")
+
+# prompt_embedds = CreateEmbeddings (prompt_docobj)
+# prompt_embeddings = prompt_embedds.create_embeddings()
+# embeddingsmodel = HuggingFaceEmbeddings(model_name="sentence-transformers/all-MiniLM-L6-v2")
+# vecstr = CreateVectorStore(prompt_doc_chunks=prompt_chunks, prompt_embeddings=prompt_embeddings, embeddingsmodel=embeddingsmodel, prompt=prompt)
+
+# similar_embeddings = vecstr.search_vectordb()
+
+
+       ######## SEARCH VECTORDB FOR PROMPT ###########
+
+search_similarity = CreateVectorStore(prompt_doc_chunks=None, embeddingsmodel=embeddingsmodel, prompt_embeddings=None, prompt=None )
+print (f"Passing input {prompt} to search vector db")
+search_vector_doc = search_similarity.search_vectordb(prompt)
+print (f"This is vector search doc-obj found after similar search: {search_vector_doc}")
+retrieved_doc_text = ""
+for doc in search_vector_doc:  #search vector doc is DOCUMNET OBJECT
+#print (doc.page_content[:100]) # print initial 100 words from page_content
+
+  ## manual concatenation of retrieved page_content
+  retrieved_doc_text= retrieved_doc_text + doc.page_content
+
+
+print (f"This is what i got from retrieved augmentation: {retrieved_doc_text}")
+
+###################  CREATING MODEL ##########################
+
+## HF's transformers helps interact, download, toekenize, manage LLMs.
+
+model = AutoModelForSeq2SeqLM.from_pretrained("google/flan-t5-large")
+# model = AutoModelForCausalLM.from_pretrained("google/flan-t5-base")
+tokenizer = AutoTokenizer.from_pretrained("google/flan-t5-large")
+
+# Combine prompt and retrieved context
+def create_response (prompt, retrieved_doc_text):
+
+  ##not simply providing concatanted strings (prompt+retrieved_text) as input to tokenizer with multiline comments using """"bdjksbd"""
+
+  input_text = f"""
+  You are an expert assistant. Use the following context to answer the question concisely and in your own words and should be human-understable.
+  Context:
+  {retrieved_doc_text}
+
+  Question:
+  {prompt}
+
+  Answer:
+  """
+
+## Feeding input text into tokenizer to get query+retrieved_text tokens.
+## max_length here controle maximum amount of input tokens, truncate others.
+  inputs = tokenizer(input_text, return_tensors="pt", max_length=1024, truncation=True)
+
+  # Generate response, I can also provide inputs["input_ids"] instead of (**input) as keyword arguement.
+  # model.generate list of tokens+list of attention masks.
+
+  output_ids = model.generate(**inputs, max_length=300, pad_token_id=tokenizer.eos_token_id, temperature=0.7, top_k=50, top_p=0.9)
+
+  ##output above recieved as single string form in a list, thats why we decode only (output[0])
+  raw_response = tokenizer.decode(output_ids[0], skip_special_tokens=True)
+  return raw_response
+
+### creating another model to pass results recieved from above model to see if any changes happenes in output.
+
+model_1 = AutoModelForSeq2SeqLM.from_pretrained("facebook/bart-large-cnn")
+tokenizer_1 = AutoTokenizer.from_pretrained("facebook/bart-large-cnn")
+def clean_response (response):
+
+  input_text = tokenizer_1(response, return_tensors="pt", truncation=True, max_length=1024)
+
+  output_ids = model_1.generate(**input_text, max_length=300, pad_token_id=tokenizer_1.eos_token_id, temperature=0.7, top_k=50, top_p=0.9)
+  response_1 = tokenizer_1.decode(output_ids[0], skip_special_tokens=True)
+  print (response_1)
+
+prompt = str(input("prompt: "))
+
+## calling models with prompt and retrieved text.
+
+raw_response=create_response(prompt, retrieved_doc_text)
+clean_response(raw_response)
