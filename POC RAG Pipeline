@@ -226,6 +226,6 @@ for doc in search_vector_doc:  ## search_vector_doc is DOCUMNET OBJECT
 print (f"This is what i got from retrieved augmentation: {retrieved_doc_text}")
 
 
-## calling main function to generate response.
+## calling main functions to generate response.
 
 create_response(prompt, retrieved_doc_text)
