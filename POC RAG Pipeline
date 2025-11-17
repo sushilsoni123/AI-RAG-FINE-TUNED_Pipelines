@@ -1,21 +1,20 @@
-
-from langchain_text_splitters import RecursiveCharacterTextSplitter
-from sentence_transformers import SentenceTransformer
+from langchain_text_splitters import RecursiveCharacterTextSplitter ##split docs in chunks.
+from sentence_transformers import SentenceTransformer  ##embedding model
 from langchain_community.vectorstores import Chroma
-from langchain_community.embeddings import HuggingFaceEmbeddings
+from langchain_community.embeddings import HuggingFaceEmbeddings ##uses SentenceTransformer in backend
 from transformers import AutoModelForCausalLM, AutoTokenizer, AutoModelForSeq2SeqLM
 # from langchain_community import Open
 # from langchain_community import LLMChain
 # from langchain_community import PromptTemplate
 from langchain_core.documents import Document
 # from pdf2image import convert_from_path    ## to extract images from pdf files.
-# from pytesseract import image_to_string # to convert images into strings.
+# from pytesseract import image_to_string ## to convert images into strings.
 # from langchain_community import OpenAI
-# from langchain_community.document_loaders import PyPDFLoader
+# from langchain_community.document_loaders import PyPDFLoader ## loads pdf and convert them into Document Object automatically(page_content+metadata)
 # from langchain_community.document_loaders import DirectoryLoader
-import fitz #pymupdf
+import fitz #pymupdf  ## to handles pdf files' knowledge base.
 import os
-from langchain_core.documents import Document
+from langchain_core.documents import Document ##to create Document Object manually, loaders creates auto document objects (page_content+metadata).
 
 
 ######################## Data Ingestion Pipeline #######################
@@ -56,27 +55,23 @@ class CreateDocuments():
             if not text.strip():
                 print(f"Skipping {file}: No extractable text (likely scanned).")
                 continue
-
-
-
-            # if file1.page_count > 0:
-            #   text = ""
-            #   for page in file1:
-            #     if page.strip():  # ✅ Only add non-empty text
-            #       text= text+page.get_text()
-            #     else
-            #   if text.strip():  # ✅ Check entire PDF before creating Document
+				
+			## then create manually document object adding page_content and metadata.##
+			
             docs = Document(page_content=text, metadata={"auther": "sushil", "sub": "Artificial Intelligence"})
             documents.append (docs)
         except Exception as e:
           print (f"This is error message for file {file}: {e}")
-
-    for i in range ((len(documents) - 1), -1, -1):
+	
+	## reverse loop to iterate over list document object##
+	## I think, i could have iterated with simple incremental method ###
+	
+    for i in range ((len(documents) - 1), -1, -1): 
       print (f"This is to view page_content, if any: {documents[i].page_content[:100]}")
     for doc in documents:
-      if doc.page_content=="":
+      if doc.page_content=="":  ### print if any empty page_content in doc object. empty doc obj fails RAG pipelines.
         print (f"This is empty doc: {doc}")
-
+      
 
     # print (documents[0])
     return documents  ##returns list of DocumentObject
@@ -132,10 +127,29 @@ class CreateVectorStore():    ##VECTOR STORE FOR DOC/KNOWLEDGE DATABASE
   def search_vectordb (self, prompt): ## FOR SEARCHING SIMILAR EMBEDDINGS IN RAG DB AGAINST PROMPT EMBEDDINGS ##
 
     self.vectorstore = Chroma(embedding_function=self.embeddingsmodel, persist_directory=self.persist_directory)
-    self.similar_doc_obj = self.vectorstore.similarity_search(prompt)
+    self.similar_doc_obj = self.vectorstore.similarity_search(prompt, k=5)
     return self.similar_doc_obj
 
+###################  CREATING MODEL ##########################
 
+model = AutoModelForSeq2SeqLM.from_pretrained("google/flan-t5-large")
+# model = AutoModelForCausalLM.from_pretrained("google/flan-t5-base")
+tokenizer = AutoTokenizer.from_pretrained("google/flan-t5-large")
+
+# Combine prompt and retrieved context
+def create_response (prompt, retrieved_doc_text):
+
+  input_text = f"Answer the question asked based on context below:\n\n{retrieved_doc_text}\n\nQuestion: {prompt}"
+
+  inputs = tokenizer(input_text, return_tensors="pt")
+
+  # Generate response
+  output_ids = model.generate(**inputs, max_length=200, pad_token_id=tokenizer.eos_token_id)
+  response = tokenizer.decode(output_ids[0], skip_special_tokens=True)
+
+
+
+prompt = str(input("prompt: "))
 
 ################################# DOCUMENTS ##################################
 
@@ -200,73 +214,21 @@ print(doc_chunks[0].page_content[:100])  # Preview text
 
 
        ######## SEARCH VECTORDB FOR PROMPT ###########
+## Directly pass prompt without chunking/ and embeddings- .search_vectordb will do chunkings and embeddings. ##
 
 search_similarity = CreateVectorStore(prompt_doc_chunks=None, embeddingsmodel=embeddingsmodel, prompt_embeddings=None, prompt=None )
 print (f"Passing input {prompt} to search vector db")
-search_vector_doc = search_similarity.search_vectordb(prompt)
+search_vector_doc = search_similarity.search_vectordb(prompt) ##directly pass plain prompt. This returns list of doc obj.
 print (f"This is vector search doc-obj found after similar search: {search_vector_doc}")
 retrieved_doc_text = ""
-for doc in search_vector_doc:  #search vector doc is DOCUMNET OBJECT
-#print (doc.page_content[:100]) # print initial 100 words from page_content
-
-  ## manual concatenation of retrieved page_content
-  retrieved_doc_text= retrieved_doc_text + doc.page_content
+for doc in search_vector_doc:  ## search_vector_doc is DOCUMNET OBJECT
+  # print (doc.page_content[:100]) ##this will show only 100 initial words from page_content.
+  retrieved_doc_text= retrieved_doc_text + doc.page_content  ##keep adding doc.page_content.
 
 
 print (f"This is what i got from retrieved augmentation: {retrieved_doc_text}")
 
-###################  CREATING MODEL ##########################
 
-## HF's transformers helps interact, download, toekenize, manage LLMs.
+## calling main function to generate response.
 
-model = AutoModelForSeq2SeqLM.from_pretrained("google/flan-t5-large")
-# model = AutoModelForCausalLM.from_pretrained("google/flan-t5-base")
-tokenizer = AutoTokenizer.from_pretrained("google/flan-t5-large")
-
-# Combine prompt and retrieved context
-def create_response (prompt, retrieved_doc_text):
-
-  ##not simply providing concatanted strings (prompt+retrieved_text) as input to tokenizer with multiline comments using """"bdjksbd"""
-
-  input_text = f"""
-  You are an expert assistant. Use the following context to answer the question concisely and in your own words and should be human-understable.
-  Context:
-  {retrieved_doc_text}
-
-  Question:
-  {prompt}
-
-  Answer:
-  """
-
-## Feeding input text into tokenizer to get query+retrieved_text tokens.
-## max_length here controle maximum amount of input tokens, truncate others.
-  inputs = tokenizer(input_text, return_tensors="pt", max_length=1024, truncation=True)
-
-  # Generate response, I can also provide inputs["input_ids"] instead of (**input) as keyword arguement.
-  # model.generate list of tokens+list of attention masks.
-
-  output_ids = model.generate(**inputs, max_length=300, pad_token_id=tokenizer.eos_token_id, temperature=0.7, top_k=50, top_p=0.9)
-
-  ##output above recieved as single string form in a list, thats why we decode only (output[0])
-  raw_response = tokenizer.decode(output_ids[0], skip_special_tokens=True)
-  return raw_response
-
-### creating another model to pass results recieved from above model to see if any changes happenes in output.
-
-model_1 = AutoModelForSeq2SeqLM.from_pretrained("facebook/bart-large-cnn")
-tokenizer_1 = AutoTokenizer.from_pretrained("facebook/bart-large-cnn")
-def clean_response (response):
-
-  input_text = tokenizer_1(response, return_tensors="pt", truncation=True, max_length=1024)
-
-  output_ids = model_1.generate(**input_text, max_length=300, pad_token_id=tokenizer_1.eos_token_id, temperature=0.7, top_k=50, top_p=0.9)
-  response_1 = tokenizer_1.decode(output_ids[0], skip_special_tokens=True)
-  print (response_1)
-
-prompt = str(input("prompt: "))
-
-## calling models with prompt and retrieved text.
-
-raw_response=create_response(prompt, retrieved_doc_text)
-clean_response(raw_response)
+create_response(prompt, retrieved_doc_text)
