@@ -147,10 +147,6 @@ def create_response (prompt, retrieved_doc_text):
   output_ids = model.generate(**inputs, max_length=200, pad_token_id=tokenizer.eos_token_id)
   response = tokenizer.decode(output_ids[0], skip_special_tokens=True)
 
-
-
-prompt = str(input("prompt: "))
-
 ################################# DOCUMENTS ##################################
 
 folder_path = "/content/drive/MyDrive"
