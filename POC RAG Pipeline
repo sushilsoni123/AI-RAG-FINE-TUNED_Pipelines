@@ -231,9 +231,6 @@ print (f"This is what i got from retrieved augmentation: {retrieved_doc_text}")
 
 ## calling main function to generate response.
 
-<<<<<<< HEAD
-create_response(prompt, retrieved_doc_text)
-=======
 model = AutoModelForSeq2SeqLM.from_pretrained("google/flan-t5-large")
 # model = AutoModelForCausalLM.from_pretrained("google/flan-t5-base")
 tokenizer = AutoTokenizer.from_pretrained("google/flan-t5-large")
@@ -285,5 +282,4 @@ prompt = str(input("prompt: "))
 
 raw_response=create_response(prompt, retrieved_doc_text)
 clean_response(raw_response)
-"added new comment"
->>>>>>> new-set-up
+
