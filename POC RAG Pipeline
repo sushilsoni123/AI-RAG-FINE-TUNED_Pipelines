@@ -161,7 +161,8 @@ doc_pages_arr = []
 for doc in documents:
   if doc.page_content != "":
     doc_pages_arr.append(doc.page_content)
-doc_pages = CreateChunkings(chunk_size=1000, chunk_overlap=200, documents= doc_pages_arr, docobj_arr=documents) #chunking requires list of DocObj
+doc_pages = CreateChunkings(chunk_size=1000, chunk_overlap=200, documents= doc_pages_arr, docobj_arr=documents)
+#chunking requires list of DocObj
 
 full_doc_chunks = doc_pages.create_chunks()
 doc_chunks = [chunk for chunk in full_doc_chunks if chunk.page_content.strip()]  # remove empty chunks
@@ -193,6 +194,9 @@ print(doc_chunks[0].page_content[:100])  # Preview text
 
 
 ##############################  PROMPT #####################################
+## Prompt chunking and embedding not required, passed query as it is to "search vectordb" which uses its own embedding method.
+
+
 # prompt_docobj = [Document(page_content=prompt, metadata={"auther": "sushil"})]
 # print (prompt_docobj[0].page_content)
 
